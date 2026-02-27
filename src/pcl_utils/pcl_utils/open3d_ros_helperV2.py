@@ -318,9 +318,13 @@ def pointcloud2_to_o3d(rospc):
     return o3dpc
 
 def ros2pc_to_o3dpc(ros_pc):
-        points = pc2.read_points(ros_pc, field_names=("x", "y", "z"), skip_nans=True)
+        points_list = []
+        for point in pc2.read_points(ros_pc, field_names=("x", "y", "z"), skip_nans=True):
+            points_list.append([point[0], point[1], point[2]])
+        
         o3d_pc = open3d.geometry.PointCloud()
-        o3d_pc.points = open3d.utility.Vector3dVector(list(points))
+        if len(points_list) > 0:
+            o3d_pc.points = open3d.utility.Vector3dVector(np.array(points_list))
         return o3d_pc
 
 import os
