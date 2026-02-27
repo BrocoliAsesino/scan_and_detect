@@ -314,8 +314,8 @@ def statistical_outlier_removal(pcl):
     nb_neighbours = 20
     std_ratio = 2.0
     cl, ind = pcl.remove_statistical_outlier(nb_neighbours, std_ratio)
-    display_inlier_outlier(cl, ind)
-    return cl.select_by_index(ind)
+    # display_inlier_outlier(cl, ind)  # Disabled visualization for headless environments
+    return cl  # cl is already the filtered inlier cloud
 
 
 import time
