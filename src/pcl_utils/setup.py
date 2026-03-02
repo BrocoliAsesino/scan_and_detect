@@ -11,11 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=[
-        'setuptools',
-        'numpy',
-        'open3d',
-    ],
+    install_requires=['setuptools'],
     zip_safe=True,
     maintainer='alejandro.gonzalez@local.eurecat.org',
     maintainer_email='alejandro.gonzalez@eurecat.org',
