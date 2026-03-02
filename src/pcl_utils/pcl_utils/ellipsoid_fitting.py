@@ -18,8 +18,8 @@ import copy
 import matplotlib.pyplot as plt
 
 
-def project_points_to_plane(pcd: o3d.geometry.PointCloud, 
-                            plane_model: np.ndarray) -> np.ndarray:
+# 2D Projections and Perimeters
+def project_point_cloud_to_plane(pcd: o3d.geometry.PointCloud, plane_model: np.ndarray) -> np.ndarray:
     """
     Project 3D point cloud points onto a 2D plane.
     
@@ -58,9 +58,7 @@ def project_points_to_plane(pcd: o3d.geometry.PointCloud,
     
     return points_2d
 
-
-def extract_perimeter_2d(pcd: o3d.geometry.PointCloud, 
-                        plane_model: np.ndarray) -> np.ndarray:
+def extract_2d_convex_hull(pcd: o3d.geometry.PointCloud, plane_model: np.ndarray) -> np.ndarray:
     """
     Extract the 2D perimeter (convex hull) of a 3D object projected onto a plane.
     
@@ -72,7 +70,7 @@ def extract_perimeter_2d(pcd: o3d.geometry.PointCloud,
         ndarray: Mx2 array of 2D perimeter points (convex hull vertices)
     """
     # Project to 2D
-    points_2d = project_points_to_plane(pcd, plane_model)
+    points_2d = project_point_cloud_to_plane(pcd, plane_model)
     
     # Compute convex hull
     if len(points_2d) < 5:
@@ -84,7 +82,8 @@ def extract_perimeter_2d(pcd: o3d.geometry.PointCloud,
     return perimeter_points
 
 
-def fit_ellipse_to_perimeter(perimeter_points_2d: np.ndarray) -> Tuple[np.ndarray, Tuple[float, float], float]:
+# Ellipsoid Fitting and Transformation
+def fit_ellipse_to_2d_points(perimeter_points_2d: np.ndarray) -> tuple[np.ndarray, tuple[float, float], float]:
     """
     Fit a 2D ellipse to perimeter points using OpenCV.
     
@@ -92,7 +91,7 @@ def fit_ellipse_to_perimeter(perimeter_points_2d: np.ndarray) -> Tuple[np.ndarra
         perimeter_points_2d: Nx2 array of 2D perimeter points
         
     Returns:
-        Tuple containing:
+        tuple containing:
         - center: (x, y) center of ellipse
         - axes: (major_axis, minor_axis) semi-axis lengths
         - angle: rotation angle in degrees
@@ -112,12 +111,7 @@ def fit_ellipse_to_perimeter(perimeter_points_2d: np.ndarray) -> Tuple[np.ndarra
     
     return center, axes, angle
 
-
-def transform_ellipse_to_3d(center_2d: np.ndarray, 
-                            axes_2d: Tuple[float, float],
-                            angle_2d: float,
-                            plane_model: np.ndarray,
-                            pcd: o3d.geometry.PointCloud) -> Tuple[np.ndarray, Tuple[float, float, float], np.ndarray]:
+def convert_ellipse_to_3d(center_2d: np.ndarray, axes_2d: tuple[float, float], angle_2d: float, plane_model: np.ndarray, pcd: o3d.geometry.PointCloud, height_margin: float = 0.01) -> tuple[np.ndarray, tuple[float, float, float], np.ndarray]:
     """
     Transform 2D ellipse parameters back to 3D space.
     
@@ -127,9 +121,10 @@ def transform_ellipse_to_3d(center_2d: np.ndarray,
         angle_2d: rotation angle in degrees
         plane_model: Plane equation [a, b, c, d]
         pcd: Original 3D point cloud (to determine height)
+        height_margin: Additional margin to add to the estimated height
         
     Returns:
-        Tuple containing:
+        tuple containing:
         - center_3d: (x, y, z) center in 3D
         - axes_3d: (semi_major, semi_minor, semi_height) for ellipsoid
         - rotation_matrix: 3x3 rotation matrix for ellipsoid orientation
@@ -157,12 +152,13 @@ def transform_ellipse_to_3d(center_2d: np.ndarray,
     # Estimate object height (along plane normal)
     # Project all points along normal direction
     heights = np.dot(points_3d - center_3d, normal)
-    semi_height = max(abs(heights.max()), abs(heights.min()))
+    semi_height = max(abs(heights.max()), abs(heights.min())) + height_margin
     
     # Create rotation matrix from 2D angle
     angle_rad = np.radians(angle_2d)
-    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
-    
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+
     # Major axis direction in 3D
     major_dir = cos_a * u + sin_a * v
     minor_dir = -sin_a * u + cos_a * v
@@ -175,10 +171,7 @@ def transform_ellipse_to_3d(center_2d: np.ndarray,
     return center_3d, axes_3d, rotation_matrix
 
 
-def create_upper_ellipsoid_mesh(center_3d: np.ndarray,
-                                axes_3d: Tuple[float, float, float],
-                                rotation_matrix: np.ndarray,
-                                resolution: int = 20) -> o3d.geometry.TriangleMesh:
+def create_upper_ellipsoid_mesh(center_3d: np.ndarray, axes_3d: tuple[float, float, float], rotation_matrix: np.ndarray, resolution: int = 20) -> o3d.geometry.TriangleMesh:
     """
     Create a 3D upper-hemisphere ellipsoid mesh.
     
@@ -238,12 +231,8 @@ def create_upper_ellipsoid_mesh(center_3d: np.ndarray,
     return sphere
 
 
-def generate_viewpoints_around_ellipsoid(center_3d: np.ndarray,
-                                         axes_3d: Tuple[float, float, float],
-                                         rotation_matrix: np.ndarray,
-                                         num_viewpoints: int = 12,
-                                         standoff_distance: float = 0.3,
-                                         elevation_range: Tuple[float, float] = (20, 70)) -> List[Tuple[np.ndarray, np.ndarray]]:
+# Viewpoint Generation
+def generate_camera_viewpoints(center_3d: np.ndarray, axes_3d: tuple[float, float, float], rotation_matrix: np.ndarray, num_viewpoints: int = 12, standoff_distance: float = 0.3, elevation_range: tuple[float, float] = (20, 70)) -> List[tuple[np.ndarray, np.ndarray]]:
     """
     Generate camera viewpoints around an ellipsoid for robotic scanning.
     
@@ -315,11 +304,88 @@ def generate_viewpoints_around_ellipsoid(center_3d: np.ndarray,
     
     return viewpoints
 
+def generate_camera_viewpoints_along_principal_axis(center_3d: np.ndarray, 
+                                                    axes_3d: tuple[float, float, float], 
+                                                    rotation_matrix: np.ndarray,
+                                                    plane_model: np.ndarray,
+                                                    num_viewpoints: int = 12, 
+                                                    standoff_distance: float = 0.3) -> List[tuple[np.ndarray, np.ndarray]]:
+    """
+    Generate camera viewpoints along the principal axis, looking straight down at the plane.
+    
+    Args:
+        center_3d: (x, y, z) center of ellipsoid
+        axes_3d: (semi_a, semi_b, semi_c) semi-axis lengths
+        rotation_matrix: 3x3 rotation matrix
+        plane_model: Plane equation coefficients [a, b, c, d] for table plane
+        num_viewpoints: number of viewpoints to generate
+        standoff_distance: distance from ellipsoid surface (meters)
+        
+    Returns:
+        List of (position, orientation_quaternion) tuples for each viewpoint
+        position: (x, y, z) camera position
+        orientation: (x, y, z, w) quaternion looking straight down at plane
+    """
+    viewpoints = []
+    
+    # Extract and normalize plane normal (pointing up from table)
+    plane_normal = plane_model[:3]
+    plane_normal = plane_normal / np.linalg.norm(plane_normal)
+    
+    # Generate uniformly distributed angles
+    azimuth_angles = np.pi / 2  # Fixed azimuth = 90 degrees to align with principal (major) axis
+    elevation_angles = np.linspace(0.33 * np.pi, -0.33 * np.pi, num_viewpoints, endpoint=False)
+    
+    for elevation in elevation_angles:
+        # Parametric point on ellipsoid surface (spherical coordinates)
+        local_point = np.array([
+            axes_3d[0] * np.sin(elevation) * np.cos(azimuth_angles),
+            axes_3d[1] * np.sin(elevation) * np.sin(azimuth_angles),
+            axes_3d[2] * np.cos(elevation)
+        ])
+        
+        # Transform to world coordinates
+        point_on_surface = rotation_matrix @ local_point + center_3d
+        
+        # Compute outward normal at this point (gradient of ellipsoid equation)
+        local_normal = local_point / (np.array(axes_3d) ** 2)
+        local_normal = local_normal / np.linalg.norm(local_normal)
+        world_normal = rotation_matrix @ local_normal
+        
+        # Camera position: offset from surface along normal
+        camera_position = point_on_surface + standoff_distance * world_normal
+        
+        # Camera looks straight down toward plane (opposite of plane normal)
+        view_direction = -plane_normal
+        view_direction = view_direction / np.linalg.norm(view_direction)
+        
+        # Camera frame: Z forward (pointing at object), Y down, X right
+        z_axis = view_direction
+        
+        # Choose up vector (world Z) and compute right vector
+        world_up = np.array([0, 0, 1])
+        x_axis = np.cross(world_up, z_axis)
+        if np.linalg.norm(x_axis) < 0.001:
+            # View direction is vertical, choose different up
+            world_up = np.array([0, 1, 0])
+            x_axis = np.cross(world_up, z_axis)
+        x_axis = x_axis / np.linalg.norm(x_axis)
+        
+        y_axis = np.cross(z_axis, x_axis)
+        
+        # Build rotation matrix: columns are camera frame axes
+        R = np.column_stack([x_axis, y_axis, z_axis])
+        
+        # Convert rotation matrix to quaternion
+        quaternion = rotation_matrix_to_quaternion(R)
+        
+        viewpoints.append((camera_position, quaternion))
+    
+    return viewpoints
 
-def visualize_2d_projection(pcd: o3d.geometry.PointCloud,
-                            plane_model: np.ndarray,
-                            perimeter_points: np.ndarray = None,
-                            title: str = "2D Projection and Perimeter"):
+
+# Visualization
+def plot_2d_projection(pcd: o3d.geometry.PointCloud, plane_model: np.ndarray, perimeter_points: np.ndarray = None, title: str = "2D Projection and Perimeter"):
     """
     Visualize 2D projection of 3D point cloud onto plane with optional perimeter.
     
@@ -330,7 +396,7 @@ def visualize_2d_projection(pcd: o3d.geometry.PointCloud,
         title: Plot title
     """
     # Project all points to 2D
-    points_2d = project_points_to_plane(pcd, plane_model)
+    points_2d = project_point_cloud_to_plane(pcd, plane_model)
     
     plt.figure(figsize=(10, 10))
     
@@ -353,11 +419,7 @@ def visualize_2d_projection(pcd: o3d.geometry.PointCloud,
     plt.show()
 
 
-def visualize_2d_ellipse_fit(perimeter_points: np.ndarray,
-                             center_2d: np.ndarray,
-                             axes_2d: Tuple[float, float],
-                             angle_2d: float,
-                             title: str = "2D Ellipse Fit"):
+def plot_ellipse_fit(perimeter_points: np.ndarray, center_2d: np.ndarray, axes_2d: tuple[float, float], angle_2d: float, title: str = "2D Ellipse Fit"):
     """
     Visualize fitted 2D ellipse over perimeter points.
     
@@ -410,11 +472,7 @@ def visualize_2d_ellipse_fit(perimeter_points: np.ndarray,
     plt.show()
 
 
-def visualize_object_and_ellipsoid(pcd: o3d.geometry.PointCloud,
-                                   ellipsoid_mesh: o3d.geometry.TriangleMesh,
-                                   center_3d: np.ndarray = None,
-                                   axes_3d: Tuple[float, float, float] = None,
-                                   window_name: str = "Object and Fitted Ellipsoid"):
+def display_object_with_ellipsoid(pcd: o3d.geometry.PointCloud, ellipsoid_mesh: o3d.geometry.TriangleMesh, center_3d: np.ndarray = None, axes_3d: tuple[float, float, float] = None, window_name: str = "Object and Fitted Ellipsoid"):
     """
     Visualize 3D object point cloud with fitted ellipsoid mesh.
     
@@ -456,88 +514,180 @@ def visualize_object_and_ellipsoid(pcd: o3d.geometry.PointCloud,
     )
 
 
-def visualize_ellipsoid_pipeline(pcd: o3d.geometry.PointCloud,
-                                 plane_model: np.ndarray,
-                                 show_2d_steps: bool = True,
-                                 show_3d_result: bool = True):
+def visualize_viewpoints_around_object(
+    pcd: o3d.geometry.PointCloud,
+    ellipsoid_mesh: o3d.geometry.TriangleMesh,
+    center_3d: np.ndarray,
+    viewpoints: List[tuple[np.ndarray, np.ndarray]],
+    num_viewpoints: int = 12,
+    standoff_distance: float = 0.3,
+    elevation_range: tuple[float, float] = (-90, 90),
+    show_view_lines: bool = True,
+    camera_frame_size: float = 0.05,
+    window_name: str = "Object with Camera Viewpoints"):
     """
-    Comprehensive visualization of the entire ellipsoid fitting pipeline.
+    Visualize object, ellipsoid, and camera viewpoints for robotic scanning.
     
     Args:
-        pcd: Input object point cloud
-        plane_model: Table plane equation [a, b, c, d]
-        show_2d_steps: Show 2D projection and ellipse fitting visualizations
-        show_3d_result: Show 3D ellipsoid result
-    """
-    print("\n" + "="*60)
-    print("ELLIPSOID FITTING PIPELINE VISUALIZATION")
-    print("="*60)
+        pcd: Original object point cloud
+        ellipsoid_mesh: Fitted ellipsoid mesh
+        center_3d: (x, y, z) center of ellipsoid
+        axes_3d: (semi_a, semi_b, semi_c) semi-axis lengths
+        rotation_matrix: 3x3 rotation matrix for ellipsoid orientation
+        num_viewpoints: number of viewpoints to generate
+        standoff_distance: distance from ellipsoid surface (meters)
+        elevation_range: (min_deg, max_deg) elevation angles for viewpoints
+        show_view_lines: whether to draw lines from cameras to object center
+        camera_frame_size: size of coordinate frames representing cameras
+        window_name: visualization window name
+    """    
+    # Color the point cloud
+    pcd_colored = copy.deepcopy(pcd)
+    pcd_colored.paint_uniform_color([0.2, 0.6, 0.9])  # Blue
     
-    # Step 1: Extract perimeter
-    print("\nStep 1: Extracting 2D perimeter...")
-    perimeter_2d = extract_perimeter_2d(pcd, plane_model)
-    print(f"  - Convex hull vertices: {len(perimeter_2d)}")
+    # Color the ellipsoid (semi-transparent red)
+    ellipsoid_colored = copy.deepcopy(ellipsoid_mesh)
+    ellipsoid_colored.paint_uniform_color([0.9, 0.3, 0.3])  # Red
+    ellipsoid_colored.compute_vertex_normals()
     
-    if show_2d_steps:
-        visualize_2d_projection(pcd, plane_model, perimeter_2d, 
-                               title="Step 1: 2D Projection and Convex Hull Perimeter")
+    geometries = [pcd_colored, ellipsoid_colored]
     
-    # Step 2: Fit 2D ellipse
-    print("\nStep 2: Fitting 2D ellipse to perimeter...")
-    center_2d, axes_2d, angle_2d = fit_ellipse_to_perimeter(perimeter_2d)
-    print(f"  - Center: ({center_2d[0]:.3f}, {center_2d[1]:.3f})")
-    print(f"  - Major axis: {axes_2d[0]:.3f} m")
-    print(f"  - Minor axis: {axes_2d[1]:.3f} m")
-    print(f"  - Angle: {angle_2d:.1f}°")
-    
-    if show_2d_steps:
-        visualize_2d_ellipse_fit(perimeter_2d, center_2d, axes_2d, angle_2d,
-                                title="Step 2: 2D Ellipse Fit")
-    
-    # Step 3: Transform to 3D
-    print("\nStep 3: Transforming ellipse to 3D ellipsoid...")
-    center_3d, axes_3d, rotation_matrix = transform_ellipse_to_3d(
-        center_2d, axes_2d, angle_2d, plane_model, pcd
+    # Add coordinate frame at object center
+    center_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+        size=camera_frame_size * 2, origin=center_3d
     )
-    print(f"  - 3D Center: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
-    print(f"  - 3D Axes: ({axes_3d[0]:.3f}, {axes_3d[1]:.3f}, {axes_3d[2]:.3f}) m")
-    print(f"  - Volume (approx): {(4/3) * np.pi * axes_3d[0] * axes_3d[1] * axes_3d[2]:.4f} m³")
+    geometries.append(center_frame)
     
-    # Step 4: Create mesh
-    print("\nStep 4: Creating ellipsoid mesh...")
-    ellipsoid_mesh = create_upper_ellipsoid_mesh(center_3d, axes_3d, rotation_matrix)
-    print(f"  - Mesh vertices: {len(ellipsoid_mesh.vertices)}")
-    print(f"  - Mesh triangles: {len(ellipsoid_mesh.triangles)}")
-    
-    if show_3d_result:
-        print("\nDisplaying 3D result (close window to continue)...")
-        visualize_object_and_ellipsoid(pcd, ellipsoid_mesh, center_3d, axes_3d,
-                                      window_name="Step 4: Final 3D Ellipsoid Fit")
-    
-    print("\n" + "="*60)
-    print("PIPELINE COMPLETE")
-    print("="*60 + "\n")
-    
-    return center_3d, axes_3d, rotation_matrix, ellipsoid_mesh
-
-
-# def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
-#     """
-#     Convert a 3x3 rotation matrix to a quaternion (x, y, z, w).
-    
-#     Args:
-#         R: 3x3 rotation matrix
+    # Add camera coordinate frames at each viewpoint
+    for i, (position, quaternion) in enumerate(viewpoints):
+        # Create coordinate frame at camera position
+        camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+            size=camera_frame_size, origin=position
+        )
         
-#     Returns:
-#         ndarray: quaternion [x, y, z, w]
-#     """
-#     trace = np.trace(R)
+        # Rotate the coordinate frame to match camera orientation
+        # Convert quaternion to rotation matrix
+        qx, qy, qz, qw = quaternion
+        R_cam = np.array([
+            [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
+            [2*(qx*qy + qz*qw), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qx*qw)],
+            [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx**2 + qy**2)]
+        ])
+        
+        camera_frame.rotate(R_cam, center=position)
+        geometries.append(camera_frame)
+        
+        # Add sphere marker at camera position for better visibility
+        sphere = o3d.geometry.TriangleMesh.create_sphere(radius=camera_frame_size * 0.3)
+        sphere.translate(position)
+        sphere.paint_uniform_color([0.1, 0.9, 0.1])  # Green
+        geometries.append(sphere)
+        
+        # Add line from camera to object center
+        if show_view_lines:
+            line_points = np.array([position, center_3d])
+            line_indices = [[0, 1]]
+            line_set = o3d.geometry.LineSet(
+                points=o3d.utility.Vector3dVector(line_points),
+                lines=o3d.utility.Vector2iVector(line_indices)
+            )
+            line_set.paint_uniform_color([0.5, 0.5, 0.5])  # Gray
+            geometries.append(line_set)
     
-#     if trace > 0:
-#         s = 0.5 / np.sqrt(trace + 1.0)
-#         w = 0.25 / s
-#         x = (R[2, 1] - R[1, 2]) * s
-#         y = (R[0, 2] - R[2, 0]) * s#!/usr/bin/env python3
-#         z = (R[1, 0] - R[0, 1]) * s
-#     else:        
-#         if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]: 
+    # Display information in title
+    title_info = f"{window_name} | {num_viewpoints} viewpoints | Standoff: {standoff_distance:.2f}m"
+    
+    print(f"\n{'='*60}")
+    print(f"VIEWPOINT VISUALIZATION")
+    print(f"{'='*60}")
+    print(f"Number of viewpoints: {num_viewpoints}")
+    print(f"Standoff distance: {standoff_distance:.3f} m")
+    print(f"Elevation range: {elevation_range[0]:.1f}° - {elevation_range[1]:.1f}°")
+    print(f"Object center: ({center_3d[0]:.3f}, {center_3d[1]:.3f}, {center_3d[2]:.3f})")
+    print(f"\nViewpoint positions (x, y, z):")
+    for i, (pos, quat) in enumerate(viewpoints):
+        print(f"  VP {i+1:2d}: ({pos[0]:6.3f}, {pos[1]:6.3f}, {pos[2]:6.3f})")
+    print(f"{'='*60}\n")
+    
+    o3d.visualization.draw_geometries(
+        geometries,
+        window_name=title_info,
+        width=1400,
+        height=1000,
+        mesh_show_back_face=True
+    )
+
+
+def rotation_matrix_to_quaternion(R: np.ndarray) -> np.ndarray:
+    """
+    Convert a 3x3 rotation matrix to a quaternion (x, y, z, w).
+    
+    Args:
+        R: 3x3 rotation matrix
+        
+    Returns:
+        ndarray: quaternion [x, y, z, w]
+    """
+    trace = np.trace(R)
+    
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        w = 0.25 / s
+        x = (R[2, 1] - R[1, 2]) * s
+        y = (R[0, 2] - R[2, 0]) * s
+        z = (R[1, 0] - R[0, 1]) * s
+    else:        
+        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            w = (R[2, 1] - R[1, 2]) / s
+            x = 0.25 * s
+            y = (R[0, 1] + R[1, 0]) / s
+            z = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            w = (R[0, 2] - R[2, 0]) / s
+            x = (R[0, 1] + R[1, 0]) / s
+            y = 0.25 * s
+            z = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            w = (R[1, 0] - R[0, 1]) / s
+            x = (R[0, 2] + R[2, 0]) / s
+            y = (R[1, 2] + R[2, 1]) / s
+            z = 0.25 * s
+    
+    return np.array([x, y, z, w])
+
+
+def ellipsoid_fitting_pipeline(pcd: o3d.geometry.PointCloud, plane_model: np.ndarray, debug: bool = False) -> Tuple[np.ndarray, Tuple[float, float, float], np.ndarray, o3d.geometry.TriangleMesh]:
+    """
+    Main pipeline to fit an ellipsoid to the object point cloud and visualize results.
+    """
+    # Step 1: Extract 2D perimeter from object projected onto table plane 
+    perimeter_2d = extract_2d_convex_hull(pcd, plane_model)
+    if debug:
+        plot_2d_projection(pcd, plane_model, perimeter_2d)
+
+    # Step 2: Fit 2D ellipse to the perimeter
+    center_2d, axes_2d, angle_2d = fit_ellipse_to_2d_points(perimeter_2d)
+    if debug:
+        plot_ellipse_fit(perimeter_2d, center_2d, axes_2d, angle_2d)
+    # Step 3: Transform 2D ellipse parameters to 3D ellipsoid
+    height_margin = 0.01
+    center_3d, axes_3d, rotation_matrix = convert_ellipse_to_3d(
+        center_2d, axes_2d, angle_2d, plane_model, pcd, height_margin
+    )
+
+    # Step 4: Create the ellipsoid mesh
+    ellipsoid_mesh = create_upper_ellipsoid_mesh(
+        center_3d, axes_3d, rotation_matrix, resolution=20
+    )
+    if debug:
+        display_object_with_ellipsoid(pcd, ellipsoid_mesh, center_3d, axes_3d)
+
+    view_points = generate_camera_viewpoints_along_principal_axis(
+        center_3d, axes_3d, rotation_matrix, plane_model, num_viewpoints=10, 
+        standoff_distance=0.1)
+    if debug:   
+        visualize_viewpoints_around_object(pcd=pcd, ellipsoid_mesh=ellipsoid_mesh, viewpoints=view_points, center_3d=center_3d, num_viewpoints=12, standoff_distance=0.1,
+                                            elevation_range=(-90, 90), show_view_lines=True, camera_frame_size=0.05)
