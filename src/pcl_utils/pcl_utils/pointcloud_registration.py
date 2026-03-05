@@ -3,27 +3,40 @@ import os
 import numpy as np
 import copy
 import rclpy
-from pcl_utils.pointcloud_processing import remove_plane_from_point_cloud, apply_dbscan_clustering
+from pcl_utils.pointcloud_processing import (
+    remove_plane_from_point_cloud,
+    apply_dbscan_clustering,
+)
 
 
 # Preprocessing
 def prepare_point_cloud_features(pcd, voxel_size):
     print(":: Preprocessing pointclouds!", flush=True)
-    #print(":: Downsample with a voxel size %.3f." % voxel_size)
+    # print(":: Downsample with a voxel size %.3f." % voxel_size)
     pcd_down = pcd.voxel_down_sample(voxel_size)
 
     radius_normal = voxel_size * 2
-    #print(":: Estimate normal with search radius %.3f." % radius_normal)
-    pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+    # print(":: Estimate normal with search radius %.3f." % radius_normal)
+    pcd_down.estimate_normals(
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30)
+    )
 
     radius_feature = voxel_size * 5
-    #print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
-    pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(pcd_down, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+    # print(":: Compute FPFH feature with search radius %.3f." % radius_feature)
+    pcd_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+        pcd_down,
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100),
+    )
     return pcd_down, pcd_fpfh
 
 
-def prepare_registration_dataset(cad_pcl_points, perception_pcl_points, voxel_size, initial_transform):
-    print(":: Preparing dataset... here are the initial poses of your pointclouds", flush=True)
+def prepare_registration_dataset(
+    cad_pcl_points, perception_pcl_points, voxel_size, initial_transform
+):
+    print(
+        ":: Preparing dataset... here are the initial poses of your pointclouds",
+        flush=True,
+    )
 
     source = cad_pcl_points
     target = perception_pcl_points
@@ -37,12 +50,24 @@ def prepare_registration_dataset(cad_pcl_points, perception_pcl_points, voxel_si
     return source, target, source_down, target_down, source_fpfh, target_fpfh
 
 
+# Visualization
+def visualize_registration_result(source, target, transformation):
+    source_temp = copy.deepcopy(source)
+    target_temp = copy.deepcopy(target)
+    source_temp.paint_uniform_color([1, 0.706, 0])
+    target_temp.paint_uniform_color([0, 0.651, 0.929])
+    source_temp.transform(transformation)
+    o3d.visualization.draw_geometries([source_temp, target_temp])
+
+
 # Registration
-def perform_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size):
+def perform_global_registration(
+    source_down, target_down, source_fpfh, target_fpfh, voxel_size
+):
     distance_threshold = voxel_size * 1.5
     print(":: executing RANSAC registration on downsampled point clouds.", flush=True)
-    #print("   Since the downsampling voxel size is %.3f," % voxel_size, flush=True)
-    #print("   we use a liberal distance threshold %.3f." % distance_threshold, flush=True)
+    # print("   Since the downsampling voxel size is %.3f," % voxel_size, flush=True)
+    # print("   we use a liberal distance threshold %.3f." % distance_threshold, flush=True)
     result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
         source_down,
         target_down,
@@ -52,24 +77,36 @@ def perform_global_registration(source_down, target_down, source_fpfh, target_fp
         distance_threshold,
         o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
         3,
-        [o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9), o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)],
+        [
+            o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+            o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
+                distance_threshold
+            ),
+        ],
         o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999),
     )
     return result
 
-def perform_icp_registration(source, target, source_fpfh, target_fpfh, voxel_size, result_ransac):
+
+def perform_icp_registration(
+    source, target, source_fpfh, target_fpfh, voxel_size, result_ransac
+):
     print(":: executing ICP registration", flush=True)
     source.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     target.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
     distance_threshold = voxel_size * 0.5
 
     result = o3d.pipelines.registration.registration_icp(
-        source, target, distance_threshold, result_ransac.transformation, o3d.pipelines.registration.TransformationEstimationPointToPlane()
+        source,
+        target,
+        distance_threshold,
+        result_ransac.transformation,
+        o3d.pipelines.registration.TransformationEstimationPointToPlane(),
     )
     return result
 
 
-def perform_icp_registration(source, target, ICP_type="PointToPoint"):
+def perform_icp_registration_test(source, target, ICP_type="PointToPoint"):
     if not target.has_points():
         return source
 
@@ -85,10 +122,26 @@ def perform_icp_registration(source, target, ICP_type="PointToPoint"):
     target_cordon = remove_plane_from_point_cloud(target)
     o3d.visualization.draw_geometries([target_cordon])
 
-    filtred_source_cordon = apply_dbscan_clustering(source_cordon, eps=0.0008, min_points=10, print_progress=True, nbre_de_cluster_retour=0, seuil=800, type_return="pcl")
+    filtred_source_cordon = apply_dbscan_clustering(
+        source_cordon,
+        eps=0.0008,
+        min_points=10,
+        print_progress=True,
+        nbre_de_cluster_retour=0,
+        seuil=800,
+        type_return="pcl",
+    )
     o3d.visualization.draw_geometries([filtred_source_cordon])
 
-    filtred_target_cordon = apply_dbscan_clustering(target_cordon, eps=0.0008, min_points=10, print_progress=True, nbre_de_cluster_retour=0, seuil=800, type_return="pcl")
+    filtred_target_cordon = apply_dbscan_clustering(
+        target_cordon,
+        eps=0.0008,
+        min_points=10,
+        print_progress=True,
+        nbre_de_cluster_retour=0,
+        seuil=800,
+        type_return="pcl",
+    )
     o3d.visualization.draw_geometries([filtred_target_cordon])
 
     crit = o3d.pipelines.registration.ICPConvergenceCriteria()
@@ -96,20 +149,47 @@ def perform_icp_registration(source, target, ICP_type="PointToPoint"):
     crit.max_iteration = 350
     crit.relative_fitness = 0.00000000000000001
     threshold = 1
-    trans_init = np.asarray([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    trans_init = np.asarray(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
     print("initial alignement")
-    evaluation = o3d.pipelines.registration.evaluate_registration(source, target, threshold, trans_init)
+    evaluation = o3d.pipelines.registration.evaluate_registration(
+        source, target, threshold, trans_init
+    )
     print(evaluation)
 
     if ICP_type == "PointToPoint":
-        reg_p2p = o3d.pipelines.registration.registration_icp(source, target, threshold, trans_init, o3d.pipelines.registration.TransformationEstimationPointToPoint(), crit)
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            threshold,
+            trans_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            crit,
+        )
 
     if ICP_type == "PointToPlane":
-        source.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50))
-        target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50))
+        source.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50)
+        )
+        target.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50)
+        )
         rclpy.logging.get_logger("ICP").info("normal estimation for ICP done")
-        reg_p2p = o3d.pipelines.registration.registration_icp(source, target, threshold, trans_init, o3d.pipelines.registration.TransformationEstimationPointToPlane(), crit)
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            threshold,
+            trans_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            crit,
+        )
 
     print(reg_p2p)
     print(reg_p2p.transformation)
@@ -119,45 +199,54 @@ def perform_icp_registration(source, target, ICP_type="PointToPoint"):
     return source
 
 
-# Visualization
-def visualize_registration_result(source, target, transformation):
-    source_temp = copy.deepcopy(source)
-    target_temp = copy.deepcopy(target)
-    source_temp.paint_uniform_color([1, 0.706, 0])
-    target_temp.paint_uniform_color([0, 0.651, 0.929])
-    source_temp.transform(transformation)
-    o3d.visualization.draw_geometries([source_temp, target_temp])
-
-
-def registration(pcl_cad, pcl_perception, initial_transform, debug_display=True, global_method='choose your fighter'):
+def registration(
+    pcl_cad,
+    pcl_perception,
+    initial_transform,
+    debug_display=True,
+    global_method="choose your fighter",
+):
     voxel_size = 0.02
     pcl_cad_copy = copy.deepcopy(pcl_cad)
     pcl_perception_copy = copy.deepcopy(pcl_perception)
 
-    if global_method == 'convex_hull':
+    if global_method == "convex_hull":
         print("Chosen registration method: ", global_method, flush=True)
         # Compute convex hulls of the point clouds
         cad_ch_mesh, _ = pcl_cad.compute_convex_hull()
         perception_ch_mesh, _ = pcl_perception.compute_convex_hull()
         cad_ch_mesh_points = cad_ch_mesh.sample_points_uniformly(number_of_points=22000)
-        perception_ch_mesh_points = perception_ch_mesh.sample_points_uniformly(number_of_points=22000)
+        perception_ch_mesh_points = perception_ch_mesh.sample_points_uniformly(
+            number_of_points=22000
+        )
         o3d.visualization.draw_geometries([pcl_cad, pcl_perception])
 
-        source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_registration_dataset(cad_ch_mesh_points, perception_ch_mesh_points, voxel_size, initial_transform)
+        source, target, source_down, target_down, source_fpfh, target_fpfh = (
+            prepare_registration_dataset(
+                cad_ch_mesh_points,
+                perception_ch_mesh_points,
+                voxel_size,
+                initial_transform,
+            )
+        )
 
-        result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
-        print("\nThe first transformation is:\n", result_ransac.transformation, flush=True)
+        result_ransac = perform_global_registration(
+            source_down, target_down, source_fpfh, target_fpfh, voxel_size
+        )
+        print(
+            "\nThe first transformation is:\n", result_ransac.transformation, flush=True
+        )
         if debug_display:
             visualize_registration_result(source, target, result_ransac.transformation)
 
-        ## NEW 
+        ## NEW
         # print("\n############ ABOUT TO APPLY A SECOND RANSAC WITHOUT CH ############:\n", flush=True)
         # new_voxel_size = 0.02
         # source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_registration_dataset(pcl_cad, pcl_perception, new_voxel_size, result_ransac.transformation)
         # print("\n############ EL NUEVO SOURCE Y TARGET ############:\n", flush=True)
         # identity = np.eye(4)
         # visualize_registration_result(source, target, identity)
-        # result_ransac2 = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
+        # result_ransac2 = perform_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
         # print("\nThe INTERMEDIATE transformation is:\n", result_ransac2.transformation, flush=True)
         # if debug_display:
         #     visualize_registration_result(source, target, result_ransac2.transformation)
@@ -167,23 +256,37 @@ def registration(pcl_cad, pcl_perception, initial_transform, debug_display=True,
         # total_transformation = result_ransac2.transformation @ result_ransac.transformation
         # result_ransac2.transformation = total_transformation
         # print("\nThe TOTAL transformation is:\n", total_transformation, flush=True)
-        result_icp = refine_registration(pcl_cad, pcl_perception, None, None, voxel_size, result_ransac)
-        print("\nThe resulting transformation is:\n", result_icp.transformation, flush=True)
+        result_icp = perform_icp_registration(
+            pcl_cad, pcl_perception, None, None, voxel_size, result_ransac
+        )
+        print(
+            "\nThe resulting transformation is:\n",
+            result_icp.transformation,
+            flush=True,
+        )
         if debug_display:
-            visualize_registration_result(pcl_cad_copy, pcl_perception_copy, result_icp.transformation)
+            visualize_registration_result(
+                pcl_cad_copy, pcl_perception_copy, result_icp.transformation
+            )
 
-
-
-    elif global_method == 'RANSAC':
+    elif global_method == "RANSAC":
         print("Chosen registration method: ", global_method, flush=True)
-        source, target, source_down, target_down, source_fpfh, target_fpfh = prepare_registration_dataset(pcl_cad, pcl_perception, voxel_size, initial_transform)
+        source, target, source_down, target_down, source_fpfh, target_fpfh = (
+            prepare_registration_dataset(
+                pcl_cad, pcl_perception, voxel_size, initial_transform
+            )
+        )
 
-        result_ransac = execute_global_registration(source_down, target_down, source_fpfh, target_fpfh, voxel_size)
+        result_ransac = perform_global_registration(
+            source_down, target_down, source_fpfh, target_fpfh, voxel_size
+        )
         if debug_display:
             visualize_registration_result(source, target, result_ransac.transformation)
 
         # Refine registration using ICP
-        result_icp = refine_registration(source, target, source_fpfh, target_fpfh, voxel_size, result_ransac)
+        result_icp = perform_icp_registration(
+            source, target, source_fpfh, target_fpfh, voxel_size, result_ransac
+        )
         if debug_display:
             visualize_registration_result(source, target, result_icp.transformation)
 
@@ -193,8 +296,6 @@ def registration(pcl_cad, pcl_perception, initial_transform, debug_display=True,
         return np.eye(4)
 
     return result_icp.transformation, result_icp.fitness
-
-
 
 
 if __name__ == "__main__":
@@ -213,7 +314,9 @@ if __name__ == "__main__":
 
     path_original_CAO = os.getcwd() + "/originalCAO/surface_process_from_CAO.stp"
     path_result = os.getcwd() + "/results/surface_recallee.stp"
-    recal_and_move(path_pcdCAO, path_pcdPerception, path_original_CAO, path_result, True)
+    # recal_and_move(
+    #     path_pcdCAO, path_pcdPerception, path_original_CAO, path_result, True
+    # )
     # move_CAO(path_to_surface_from_CAO, path_result, trICP)
 
     # *****************DEBUG CODE ( visualisation)***********************
