@@ -89,6 +89,7 @@ def msg_to_se3(msg):
     """convert geometric ROS messages to SE(3)
     Args:
         msg (geometry_msgs/Pose, geometry_msgs/PoseStamped,
+        msg (geometry_msgs/Pose, geometry_msgs/PoseStamped,
         geometry_msgs/Transform, geometry_msgs/TransformStamped): ROS geometric messages to be converted
     Returns:
         se3 (np.array): a 4x4 SE(3) matrix as a numpy array
@@ -130,6 +131,8 @@ def pq_to_pose_stamped(p, q, source_frame, target_frame, stamp=None):
     """
     pose_stamped = PoseStamped()
     pose_stamped.header.frame_id = source_frame
+    if stamp is None:
+        stamp = Clock().now().to_msg()
     if stamp is None:
         stamp = Clock().now().to_msg()
     pose_stamped.header.stamp = stamp
@@ -193,6 +196,8 @@ def pq_to_transform_stamped(p, q, source_frame, target_frame, stamp=None):
     transform_stamped.header.frame_id = source_frame
     if stamp is None:
         stamp = Clock().now().to_msg()
+    if stamp is None:
+        stamp = Clock().now().to_msg()
     transform_stamped.header.stamp = stamp
     transform_stamped.child_frame_id = target_frame
     transform_stamped.transform = pq_to_transform(p, q)
@@ -204,9 +209,11 @@ def se3_to_transform(transform_nparray):
     """convert 4x4 SE(3) to geometry_msgs/Transform
     Args:
         transform_nparray (np.array): 4x4 SE(3)
+        transform_nparray (np.array): 4x4 SE(3)
     Returns:
         transform (geometry_msgs/Transform): ROS transform of given SE(3)
     """
+    pos = transform_nparray[:3, 3]
     pos = transform_nparray[:3, 3]
     quat = t.quaternion_from_matrix(transform_nparray)
     transform = pq_to_transform(pos, quat)
@@ -217,11 +224,13 @@ def se3_to_transform_stamped(transform_nparray, source_frame, target_frame, stam
     """convert 4x4 SE(3) to geometry_msgs/TransformStamped
     Args:
         transform_nparray (np.array): 4x4 SE(3)
+        transform_nparray (np.array): 4x4 SE(3)
         source_frame (string): name of tf source frame
         target_frame (string): name of tf target frame
     Returns:
         transform_stamped (geometry_msgs/TransformStamped): ROS transform_stamped of given SE(3)
     """
+    pos = transform_nparray[:3, 3]
     pos = transform_nparray[:3, 3]
     quat = t.quaternion_from_matrix(transform_nparray)
     if stamp is None:
@@ -263,6 +272,8 @@ def average_pq(ps, qs):
     Args:
         ps (np.array): multiple position array of shape Nx3
         qs (np.array): multiple quaternion array of shape Nx4
+        ps (np.array): multiple position array of shape Nx3
+        qs (np.array): multiple quaternion array of shape Nx4
     Returns:
         p_mean (np.array): averaged position array
         q_mean (np.array): averaged quaternion array
@@ -290,6 +301,7 @@ def pointcloud2_to_o3d(rospc):
     Args:
         rospc (sensor_msgs.msg.PointCloud2): ros point cloud message
         remove_nans (bool): if true, ignore the NaN points
+    Returns:
     Returns:
         o3dpc (open3d.geometry.PointCloud): open3d point cloud
     """
@@ -333,6 +345,17 @@ def load_stl_as_point_cloud(file_path, scale_factor=0.001):
     return point_cloud
 
 
+def load_pcd_as_point_cloud(file_path, scale_factor=0.001):
+    if not os.path.isfile(file_path):
+        print(f"File not found: {file_path}", flush=True)
+        return None
+
+    point_cloud = open3d.io.read_point_cloud(file_path)
+    point_cloud.scale(scale_factor, np.array([0, 0, 0]))
+
+    return point_cloud
+
+
 BIT_MOVE_16 = 2**16
 BIT_MOVE_8 = 2**8
 
@@ -344,6 +367,7 @@ def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None):
     Args:
         o3dpc (open3d.geometry.PointCloud): open3d point cloud
         frame_id (string): frame id of ros point cloud header
+        stamp (rclpy.time.Time): time stamp of ros point cloud header
         stamp (rclpy.time.Time): time stamp of ros point cloud header
     Returns:
         rospc (sensor.msg.PointCloud2): ros point cloud message
@@ -421,7 +445,9 @@ def do_transform_point(o3dpc, transform_stamped):
     """transform a input cloud with respect to the specific frame
         open3d version of tf2_geometry_msgs.do_transform_point
     Args:
+    Args:
         o3dpc (open3d.geometry.PointCloud): open3d point cloud
+        transform_stamped (geometry_msgs.msgs.TransformStamped): transform to be applied
         transform_stamped (geometry_msgs.msgs.TransformStamped): transform to be applied
     Returns:
         o3dpc (open3d.geometry.PointCloud): transformed open3d point cloud
@@ -483,6 +509,7 @@ def crop_with_2dmask(o3dpc, mask, K=None):
         o3dpc.points = open3d.utility.Vector3dVector(cloud_npy)
     else:
         # project 3D points to 2D pixel
+        cloud_npy = np.asarray(o3dpc.points)
         cloud_npy = np.asarray(o3dpc.points)
         x = cloud_npy[:, 0]
         y = cloud_npy[:, 1]

@@ -7,7 +7,6 @@ import rclpy
 
 from geometry_msgs.msg import Point
 from shape_msgs.msg import Mesh, MeshTriangle
-from mesh_msgs.msg import MeshGeometryStamped, MeshTriangleIndices
 
 
 # Point Cloud Operations
@@ -63,6 +62,7 @@ def apply_dbscan_clustering(
     """
     Apply DBSCAN clustering to a point cloud.
 
+
     Args:
         pcl: Input point cloud
         eps: Maximum distance between two points to be considered neighbors
@@ -72,6 +72,7 @@ def apply_dbscan_clustering(
         seuil: Minimum cluster size threshold (used when nbre_de_cluster_retour=0)
         type_return: Return type - "tbl" (list of clusters), "pcl" (concatenated point cloud), or "labels" (numpy array of labels)
         visu_cluster: Whether to visualize clusters
+
 
     Returns:
         Depending on type_return:
@@ -229,28 +230,41 @@ def ball_pivoting_mesh_reconstruction(pcl):
     return mesh
 
 
-def convert_mesh_to_ros_geometry_msg(mesh):
+def convert_mesh_to_ros_shape_msg(mesh):
     vertices = np.array(mesh.vertices)
-    triangles = np.array(mesh.triangles)
+    triangles = np.array(mesh.triangles, dtype=np.uint32)
 
-    message = MeshGeometryStamped()
-    message.uuid = "msg"
-    message.header.stamp = rclpy.time.Time().to_msg()
-    message.header.frame_id = "world"
-
+    message = Mesh()
     for i in range(len(vertices)):
         Message_point = Point()
-        Message_point.x = vertices[i][0]
-        Message_point.y = vertices[i][1]
-        Message_point.z = vertices[i][2]
-        message.mesh_geometry.vertices.append(Message_point)
+        Message_point.x = float(vertices[i][0])
+        Message_point.y = float(vertices[i][1])
+        Message_point.z = float(vertices[i][2])
+        message.vertices.append(Message_point)
 
     for i in range(len(triangles)):
-        Message_triangles = MeshTriangleIndices()
-        Message_triangles.vertex_indices = triangles[i]
-        message.mesh_geometry.faces.append(Message_triangles)
+        Message_triangles = MeshTriangle()
+        Message_triangles.vertex_indices = triangles[i].astype(np.uint32).tolist()
+        message.triangles.append(Message_triangles)
 
     return message
+
+
+def convert_ros_shape_msg_to_mesh(ros_shape_msg):
+    vertices = ros_shape_msg.vertices
+    triangles = ros_shape_msg.triangles
+
+    mesh = o3d.geometry.TriangleMesh()
+
+    for vertex in vertices:
+        Message_point = [vertex.x, vertex.y, vertex.z]
+        mesh.vertices.append(Message_point)
+
+    for triangle in triangles:
+        Message_triangles = triangle.vertex_indices
+        mesh.triangles.append(Message_triangles)
+
+    return mesh
 
 
 def convert_mesh_to_ros_msg(mesh):
@@ -443,6 +457,7 @@ def generate_upper_ellipsoid_mesh(
     vertices = np.asarray(sphere.vertices)
 
     # Keep only upper hemisphere (z >= 0 in local coordinates)
+    # upper_mask = vertices[:, 2] >= 0
     # upper_mask = vertices[:, 2] >= 0
 
     # Scale to ellipsoid
