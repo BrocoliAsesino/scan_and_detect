@@ -15,23 +15,44 @@ from rclpy.executors import MultiThreadedExecutor
 
 
 from sensor_msgs.msg import PointCloud2
+from geometry_msgs.msg import Point, Pose
 from std_srvs.srv import Trigger
+from scan_and_plan_interfaces.srv import (
+    FilterPCD,
+    ComputeEllipsoidFitting,
+    GenerateViewPoints,
+)
 
 import copy
 
 
 class FilterPCL(Node):
     def __init__(self):
-        super().__init__("test_pcl_filter")
+        super().__init__("pcl_utils_server")
         self.cb_group = ReentrantCallbackGroup()
 
-        self.create_subscription(
-            PointCloud2,
-            "/camera/depth/color/points",
-            self.point_cloud_callback,
-            1,
+        # Create services with custom interfaces
+        self.create_service(
+            FilterPCD,
+            "filter_pcd",
+            self.filter_pcd_callback,
             callback_group=self.cb_group,
         )
+        self.create_service(
+            ComputeEllipsoidFitting,
+            "compute_ellipsoid_fitting",
+            self.ellipsoid_fitting_callback,
+            callback_group=self.cb_group,
+        )
+        self.create_service(
+            GenerateViewPoints,
+            "generate_viewpoints",
+            self.generate_viewpoints_callback,
+            callback_group=self.cb_group,
+        )
+
+        self.create_timer(0.1, self.timer_callback, callback_group=self.cb_group)
+
         self.create_service(
             Trigger,
             "store_latest_o3d_pcd",
@@ -73,16 +94,33 @@ class FilterPCL(Node):
         self.plane_num_iterations = 1000
 
         # Clustering parameters
-        self.cluster_eps = 0.02  # 20mm neighborhood for clustering
+        self.cluster_eps = 0.01  # 10mm neighborhood for clustering
         self.cluster_min_points = 20  # Minimum points to form a cluster
 
         self.enable_visualization = True  # Set to True to see each step
 
+        # Store latest frame ID for publishing
+        self.latest_frame_id = "camera_depth_optical_frame"
+
         self.get_logger().info(
-            "FilterPCL node initialized. Call /visualize_pipeline service to see processing stages."
+            "PCL Utils Server initialized. Available services: /filter_pcd, /compute_ellipsoid_fitting, /generate_viewpoints, /visualize_pipeline, /store_latest_o3d_pcd"
         )
 
-    def point_cloud_callback(self, msg):
+    def timer_callback(self):
+        # Publish filtered point clouds back to ROS for RViz visualization
+        if len(self.denoised_pcd.points) > 0:
+            filtered_ros = o3d_ros.o3dpc_to_rospc(
+                self.denoised_pcd, frame_id=self.latest_frame_id
+            )
+            self.filtered_pub.publish(filtered_ros)
+
+        if len(self.object_pcd.points) > 0:
+            object_ros = o3d_ros.o3dpc_to_rospc(
+                self.object_pcd, frame_id=self.latest_frame_id
+            )
+            self.object_pub.publish(object_ros)
+
+    def filter_pcd_callback(self, request, response):
         """
         Complete point cloud processing pipeline:
         1. Convert ROS -> Open3D
@@ -90,24 +128,62 @@ class FilterPCL(Node):
         3. Voxel downsampling (reduce density, improve performance)
         4. Statistical outlier removal (remove noise)
         5. Plane segmentation and removal (remove table/ground)
+        6. DBSCAN clustering (extract main object)
         """
         try:
+            # Store frame ID for publishing
+            self.latest_frame_id = request.input_pcd.header.frame_id
+
+            # Use request parameters or defaults
+            x_range = request.x_range if len(request.x_range) == 2 else self.x_range
+            y_range = request.y_range if len(request.y_range) == 2 else self.y_range
+            z_range = request.z_range if len(request.z_range) == 2 else self.z_range
+            voxel_size = (
+                request.voxel_size if request.voxel_size > 0 else self.voxel_size
+            )
+            plane_distance_threshold = (
+                request.plane_distance_threshold
+                if request.plane_distance_threshold > 0
+                else self.plane_distance_threshold
+            )
+            plane_ransac_n = (
+                request.plane_ransac_n
+                if request.plane_ransac_n > 0
+                else self.plane_ransac_n
+            )
+            plane_num_iterations = (
+                request.plane_num_iterations
+                if request.plane_num_iterations > 0
+                else self.plane_num_iterations
+            )
+            cluster_eps = (
+                request.cluster_eps if request.cluster_eps > 0 else self.cluster_eps
+            )
+            cluster_min_points = (
+                request.cluster_min_points
+                if request.cluster_min_points > 0
+                else self.cluster_min_points
+            )
+
             # Step 1: Convert ROS PointCloud2 to Open3D
             self.get_logger().info(
-                "Received point cloud with %d points" % (msg.width * msg.height)
+                "Received point cloud with %d points"
+                % (request.input_pcd.width * request.input_pcd.height)
             )
-            self.raw_pcd = o3d_ros.ros2pc_to_o3dpc(msg)
+            self.raw_pcd = o3d_ros.ros2pc_to_o3dpc(request.input_pcd)
 
             if len(self.raw_pcd.points) == 0:
-                self.get_logger().warn("Received empty point cloud!")
-                return
+                response.success = False
+                response.message = "Received empty point cloud!"
+                self.get_logger().warn(response.message)
+                return response
 
             # Step 2: Apply pass-through filter to focus on region of interest
             self.get_logger().info(
                 "Step 1: Raw point cloud has %d points" % len(self.raw_pcd.points)
             )
             self.cropped_pcd = o3d_ros.apply_pass_through_filter(
-                self.raw_pcd, self.x_range, self.y_range, self.z_range
+                self.raw_pcd, x_range, y_range, z_range
             )
             self.get_logger().info(
                 "Step 2: After pass-through filter: %d points"
@@ -115,15 +191,17 @@ class FilterPCL(Node):
             )
 
             if len(self.cropped_pcd.points) < 100:
-                self.get_logger().warn(
+                response.success = False
+                response.message = (
                     "Too few points after cropping! Check your filter ranges."
                 )
-                return
+                self.get_logger().warn(response.message)
+                return response
 
             # Step 3: Voxel downsampling for efficiency
             # Reduces point density while preserving structure
             self.downsampled_pcd, _ = pcd_registration.prepare_point_cloud_features(
-                self.cropped_pcd, voxel_size=self.voxel_size
+                self.cropped_pcd, voxel_size=voxel_size
             )
             self.get_logger().info(
                 "Step 3: After voxel downsampling: %d points"
@@ -144,9 +222,9 @@ class FilterPCL(Node):
             self.plane_removed_pcd, plane_model = (
                 pcd_processing.remove_plane_from_point_cloud(
                     self.denoised_pcd,
-                    distance_threshold=self.plane_distance_threshold,
-                    ransac_n=self.plane_ransac_n,
-                    num_iterations=self.plane_num_iterations,
+                    distance_threshold=plane_distance_threshold,
+                    ransac_n=plane_ransac_n,
+                    num_iterations=plane_num_iterations,
                 )
             )
 
@@ -165,12 +243,12 @@ class FilterPCL(Node):
 
             # Step 6: DBSCAN clustering to keep only the largest cluster (the main object)
             # Clusters are well separated, so use looser parameters
-            if len(self.plane_removed_pcd.points) > self.cluster_min_points:
+            if len(self.plane_removed_pcd.points) > cluster_min_points:
                 labels = np.array(
                     pcd_processing.apply_dbscan_clustering(
                         self.plane_removed_pcd,
-                        eps=self.cluster_eps,
-                        min_points=self.cluster_min_points,
+                        eps=cluster_eps,
+                        min_points=cluster_min_points,
                         print_progress=False,
                         nbre_de_cluster_retour=0,
                         seuil=800,
@@ -218,41 +296,206 @@ class FilterPCL(Node):
             # Store the final result
             self.latest_o3d_pcd = copy.deepcopy(self.object_pcd)
 
-            # Optional: Estimate normals for the final object (useful for mesh reconstruction later)
-            if len(self.object_pcd.points) > 50:
-                self.object_pcd.estimate_normals(
-                    search_param=open3d.geometry.KDTreeSearchParamHybrid(
-                        radius=0.02, max_nn=30
-                    )
-                )
-                self.get_logger().info("Normals estimated for object point cloud")
-
-            # Publish filtered point clouds back to ROS for RViz visualization
-            if len(self.denoised_pcd.points) > 0:
-                filtered_ros = o3d_ros.o3dpc_to_rospc(
-                    self.denoised_pcd, frame_id=msg.header.frame_id
-                )
-                self.filtered_pub.publish(filtered_ros)
-
-            if len(self.object_pcd.points) > 0:
-                object_ros = o3d_ros.o3dpc_to_rospc(
-                    self.object_pcd, frame_id=msg.header.frame_id
-                )
-                self.object_pub.publish(object_ros)
-
-            self.get_logger().info(
-                "Processing complete! Final object has %d points"
-                % len(self.latest_o3d_pcd.points)
+            # Populate response - convert filtered object back to ROS PointCloud2
+            response.filtered_pcd = o3d_ros.o3dpc_to_rospc(
+                self.object_pcd, frame_id=self.latest_frame_id
             )
+            response.plane_model = plane_model
+            response.success = True
+            response.message = "Point cloud filtering completed successfully"
 
-            # Ellipsoid fitting
-            ellipsoid_fit.ellipsoid_fitting_pipeline(
-                self.object_pcd, self.plane_model, debug=True
-            )
+            return response
 
         except Exception as e:
-            self.get_logger().error("Error in point cloud processing: %s" % str(e))
+            response.success = False
+            response.message = "Error in point cloud processing: %s" % str(e)
+            self.get_logger().error(response.message)
+            return response
 
+    def ellipsoid_fitting_callback(self, request, response):
+        """
+        Service to perform ellipsoid fitting on the point cloud and generate viewpoints
+        """
+        self.get_logger().info("Ellipsoid fitting service called")
+
+        try:
+            # Convert ROS PointCloud2 to Open3D
+            object_pcd = o3d_ros.ros2pc_to_o3dpc(request.object_pcd)
+
+            if len(object_pcd.points) == 0:
+                response.success = False
+                response.message = (
+                    "No object point cloud available (empty point cloud)."
+                )
+                return response
+
+            if len(request.plane_model) != 4:
+                response.success = False
+                response.message = (
+                    "Invalid plane model. Expected 4 values [a, b, c, d]."
+                )
+                return response
+
+            plane_model = np.array(request.plane_model)
+            height_margin = request.height_margin if request.height_margin > 0 else 0.01
+
+            """
+            Main pipeline to fit an ellipsoid to the object point cloud and visualize results.
+            """
+            # Step 1: Extract 2D perimeter from object projected onto table plane
+            perimeter_2d = ellipsoid_fit.extract_2d_convex_hull(object_pcd, plane_model)
+            if request.debug:
+                ellipsoid_fit.plot_2d_projection(object_pcd, plane_model, perimeter_2d)
+
+            # Step 2: Fit 2D ellipse to the perimeter
+            center_2d, axes_2d, angle_2d = ellipsoid_fit.fit_ellipse_to_2d_points(
+                perimeter_2d
+            )
+            if request.debug:
+                ellipsoid_fit.plot_ellipse_fit(
+                    perimeter_2d, center_2d, axes_2d, angle_2d
+                )
+
+            # Step 3: Transform 2D ellipse parameters to 3D ellipsoid
+            center_3d, axes_3d, rotation_matrix = ellipsoid_fit.convert_ellipse_to_3d(
+                center_2d, axes_2d, angle_2d, plane_model, object_pcd, height_margin
+            )
+
+            # Step 4: Create the ellipsoid mesh
+            # returns a o3d.geometry.TriangleMesh - could be returned in the response
+            ellipsoid_mesh_o3d = ellipsoid_fit.create_upper_ellipsoid_mesh(
+                center_3d, axes_3d, rotation_matrix, resolution=20
+            )
+            if request.debug:
+                ellipsoid_fit.display_object_with_ellipsoid(
+                    object_pcd, ellipsoid_mesh_o3d, center_3d, axes_3d
+                )
+
+            # Populate response
+            response.center_3d = Point(
+                x=float(center_3d[0]), y=float(center_3d[1]), z=float(center_3d[2])
+            )
+            response.axes_3d = [float(axes_3d[0]), float(axes_3d[1]), float(axes_3d[2])]
+            response.rotation_matrix = rotation_matrix.flatten().tolist()
+            response.ellipsoid_mesh = pcd_processing.convert_mesh_to_ros_shape_msg(
+                ellipsoid_mesh_o3d
+            )
+            response.success = True
+            response.message = "Ellipsoid fitting completed successfully"
+            self.get_logger().info(response.message)
+
+            return response
+
+        except Exception as e:
+            response.success = False
+            response.message = "Error during ellipsoid fitting: %s" % str(e)
+            self.get_logger().error(response.message)
+            return response
+
+    def generate_viewpoints_callback(self, request, response):
+        """
+        Service to generate camera viewpoints around an ellipsoid
+        """
+        self.get_logger().info("Generate viewpoints service called")
+
+        try:
+            # Parse ellipsoid parameters from request
+            center_3d = np.array(
+                [request.center_3d.x, request.center_3d.y, request.center_3d.z]
+            )
+            axes_3d = np.array(request.axes_3d)
+            rotation_matrix = np.array(request.rotation_matrix).reshape(3, 3)
+            plane_model = np.array(request.plane_model)
+
+            # Use request parameters or defaults
+            standoff_distance = (
+                request.standoff_distance if request.standoff_distance > 0 else 0.1
+            )
+            elevation_range = (
+                (request.elevation_min, request.elevation_max)
+                if request.elevation_max > request.elevation_min
+                else (20, 70)
+            )
+            num_viewpoints = (
+                request.num_viewpoints if request.num_viewpoints > 0 else 12
+            )
+
+            # Parse optional visualization objects
+            object_pcd = None
+            if request.object_pcd and request.object_pcd.width > 0:
+                object_pcd = o3d_ros.ros2pc_to_o3dpc(request.object_pcd)
+
+            # Note: ellipsoid_mesh would need proper mesh message type
+            ellipsoid_mesh = None
+            if request.ellipsoid_mesh and request.ellipsoid_mesh.triangles:
+                ellipsoid_mesh = pcd_processing.convert_ros_shape_msg_to_mesh(
+                    request.ellipsoid_mesh
+                )
+
+            # Generate viewpoints based on method
+            if request.use_minor_axis:
+                view_points = (
+                    ellipsoid_fit.generate_camera_viewpoints_along_principal_axis(
+                        center_3d,
+                        axes_3d,
+                        rotation_matrix,
+                        plane_model,
+                        num_viewpoints=num_viewpoints,
+                        standoff_distance=standoff_distance,
+                        use_minor_axis=True,
+                    )
+                )
+            else:
+                view_points = ellipsoid_fit.generate_camera_viewpoints_around_ellipsoid(
+                    center_3d,
+                    axes_3d,
+                    rotation_matrix,
+                    num_viewpoints=num_viewpoints,
+                    standoff_distance=standoff_distance,
+                    elevation_range=elevation_range,
+                )
+
+            # Optional: visualize if debug is enabled and objects are provided
+            if request.debug and object_pcd is not None:
+                ellipsoid_fit.visualize_viewpoints_around_object(
+                    pcd=object_pcd,
+                    ellipsoid_mesh=ellipsoid_mesh,
+                    viewpoints=view_points,
+                    center_3d=center_3d,
+                    num_viewpoints=num_viewpoints,
+                    standoff_distance=standoff_distance,
+                    elevation_range=(-90, 90),
+                    show_view_lines=True,
+                    camera_frame_size=0.05,
+                )
+
+            # Populate response with generated viewpoints
+            # Convert viewpoints to Pose messages
+            response.viewpoints = []
+            for position, quaternion in view_points:
+                pose = Pose()
+                pose.position.x = float(position[0])
+                pose.position.y = float(position[1])
+                pose.position.z = float(position[2])
+                pose.orientation.x = float(quaternion[0])
+                pose.orientation.y = float(quaternion[1])
+                pose.orientation.z = float(quaternion[2])
+                pose.orientation.w = float(quaternion[3])
+                response.viewpoints.append(pose)
+
+            response.success = True
+            response.message = "Generated %d viewpoints successfully" % len(view_points)
+            self.get_logger().info(response.message)
+
+            return response
+
+        except Exception as e:
+            response.success = False
+            response.message = "Error during viewpoint generation: %s" % str(e)
+            self.get_logger().error(response.message)
+            return response
+
+    ##############################################################################################
     def visualize_stages(self, pcd_list, titles, colors=None, sequential=True):
         """
         Visualize multiple point clouds either sequentially or side by side
