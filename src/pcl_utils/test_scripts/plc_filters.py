@@ -4,7 +4,9 @@ import open3d
 import numpy as np
 
 import pcl_utils.open3d_ros_helperV2 as o3d_ros
-from pcl_utils.surface_reconstruction_lib import supress_plane, statistical_outlier_removal, db_scan_filter
+import pcl_utils.pointcloud_processing as pcd_processing
+import pcl_utils.pointcloud_registration as pcd_registration
+import pcl_utils.ellipsoid_fitting as ellipsoid_fit
 
 import rclpy
 from rclpy.node import Node
@@ -16,8 +18,6 @@ from sensor_msgs.msg import PointCloud2
 from std_srvs.srv import Trigger
 
 import copy
-
-from pcl_utils.surface_playground import extract_perimeter_2d, fit_ellipse_to_perimeter, transform_ellipse_to_3d, create_upper_ellipsoid_mesh, visualize_2d_ellipse_fit, visualize_2d_projection, visualize_object_and_ellipsoid
 
 class FilterPCL(Node):
     def __init__(self):
@@ -42,7 +42,7 @@ class FilterPCL(Node):
         self.object_pcd = open3d.geometry.PointCloud()  # Final object (largest cluster)
         self.plane_model = None  # Table plane equation [a, b, c, d] from RANSAC
         
-        # Processing parameters
+        # Processing parameters - size of the region of interest (ROI) around the object
         self.x_range = [-0.5, 0.5]  # meters
         self.y_range = [-0.5, 0.5]  # meters
         self.z_range = [0.3, 1.2]   # meters
@@ -92,36 +92,38 @@ class FilterPCL(Node):
             
             # Step 3: Voxel downsampling for efficiency
             # Reduces point density while preserving structure
-            self.downsampled_pcd = self.cropped_pcd.voxel_down_sample(voxel_size=self.voxel_size)
+            self.downsampled_pcd, _ = pcd_registration.prepare_point_cloud_features(self.cropped_pcd, voxel_size=self.voxel_size)
             self.get_logger().info('Step 3: After voxel downsampling: %d points' % len(self.downsampled_pcd.points))
             
             # Step 4: Statistical outlier removal to remove noise
             # Removes points that are far from their neighbors (sensor noise, flying pixels)
-            self.denoised_pcd = statistical_outlier_removal(self.downsampled_pcd)
+            self.denoised_pcd = pcd_processing.remove_statistical_outliers(self.downsampled_pcd)
             self.get_logger().info('Step 4: After denoising: %d points' % len(self.denoised_pcd.points))
             
             # Step 5: Remove the dominant plane (table/ground)
             # Uses RANSAC to detect and remove the table plane
-            plane_model, inliers = self.denoised_pcd.segment_plane(
+            self.plane_removed_pcd, plane_model = pcd_processing.remove_plane_from_point_cloud(
+                self.denoised_pcd,
                 distance_threshold=self.plane_distance_threshold,
                 ransac_n=self.plane_ransac_n,
                 num_iterations=self.plane_num_iterations
             )
+
             # Store plane model for ellipsoid fitting
             self.plane_model = np.array(plane_model)
-            self.plane_removed_pcd = self.denoised_pcd.select_by_index(inliers, invert=True)
             self.get_logger().info('Step 5: After plane removal: %d points (plane: [%.3f, %.3f, %.3f, %.3f])' % 
                                   (len(self.plane_removed_pcd.points), plane_model[0], plane_model[1], plane_model[2], plane_model[3]))
-            
-            self.filtered_pcd = self.plane_removed_pcd
-            
+                        
             # Step 6: DBSCAN clustering to keep only the largest cluster (the main object)
             # Clusters are well separated, so use looser parameters
             if len(self.plane_removed_pcd.points) > self.cluster_min_points:
-                labels = np.array(self.plane_removed_pcd.cluster_dbscan(
-                    eps=0.02,  # 20mm neighborhood - good for well-separated clusters
-                    min_points=20,  # Lower threshold since clusters are separated
-                    print_progress=False
+                labels = np.array(pcd_processing.apply_dbscan_clustering(
+                    self.plane_removed_pcd, 
+                    eps=0.02, min_points=20, 
+                    print_progress=False, 
+                    nbre_de_cluster_retour=0, 
+                    seuil=800, 
+                    type_return="labels"
                 ))
                 
                 if len(labels) > 0 and labels.max() >= 0:
@@ -166,23 +168,9 @@ class FilterPCL(Node):
             
             self.get_logger().info('Processing complete! Final object has %d points' % len(self.latest_o3d_pcd.points))
             
-            # Step 1: Extract 2D perimeter from object projected onto table plane
-            perimeter_2d = extract_perimeter_2d(self.object_pcd, self.plane_model)
-            visualize_2d_projection(self.object_pcd, self.plane_model, perimeter_2d)
+            # Ellipsoid fitting 
+            ellipsoid_fit.ellipsoid_fitting_pipeline(self.object_pcd, self.plane_model, debug=True)
 
-            # Step 2: Fit 2D ellipse to the perimeter
-            center_2d, axes_2d, angle_2d = fit_ellipse_to_perimeter(perimeter_2d)
-            visualize_2d_ellipse_fit(perimeter_2d, center_2d, axes_2d, angle_2d)
-            # Step 3: Transform 2D ellipse parameters to 3D ellipsoid
-            center_3d, axes_3d, rotation_matrix = transform_ellipse_to_3d(
-                center_2d, axes_2d, angle_2d, self.plane_model, self.object_pcd
-            )
-            # visualize_object_and_ellipsoid(self.object_pcd, center_3d, axes_3d, rotation_matrix)
-
-            # Step 4: Create the ellipsoid mesh
-            ellipsoid_mesh = create_upper_ellipsoid_mesh(
-                center_3d, axes_3d, rotation_matrix, resolution=20
-            )
         except Exception as e:
             self.get_logger().error('Error in point cloud processing: %s' % str(e))
         
