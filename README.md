@@ -45,6 +45,32 @@ Object shape approximation and camera viewpoint planning:
 - **Viewpoint generation**: Compute camera positions around objects for optimal scanning coverage
 - **Visualization tools**: Plot fitted shapes and viewpoint configurations
 
+##### Geometric Implementation
+
+The ellipsoid fitting algorithm follows a multi-step geometric transformation process:
+
+**Step 1: 3D to 2D Projection**
+
+![Projection Geometry](graphical_content/handwritten_explanation_1.jpeg)
+
+The 3D object point cloud is projected onto the detected table plane, creating a 2D representation of the object's footprint.
+
+
+**Step 3: 2D to 3D Transformation**
+
+![Ellipse Fitting](graphical_content/handwritten_explanation_2.jpeg)
+
+
+![3D Ellipsoid Generation](graphical_content/handwritten_explanation_3.jpeg)
+
+The 2D ellipse parameters (center, axes, rotation) are transformed back to 3D space, with the height dimension computed from the original point cloud.
+
+**Step 4: Viewpoint Generation**
+
+![Viewpoint Planning](graphical_content/handwritten_explanation_4.jpeg)
+
+Camera viewpoints are generated around the ellipsoid surface at specified standoff distances and elevation angles for optimal scanning coverage.
+
 #### 3. Point Cloud Registration (`pointcloud_registration.py`)
 Alignment and registration of multiple point clouds:
 - **Feature-based registration**: FPFH descriptors for initial alignment
