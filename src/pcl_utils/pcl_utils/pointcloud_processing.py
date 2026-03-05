@@ -7,8 +7,7 @@ import rclpy
 
 from geometry_msgs.msg import Point
 from shape_msgs.msg import Mesh, MeshTriangle
-# from mesh_msgs.msg import MeshGeometryStamped, MeshTriangleIndices
-
+from mesh_msgs.msg import MeshGeometryStamped, MeshTriangleIndices
 
 
 # Point Cloud Operations
@@ -39,16 +38,31 @@ def crop_point_cloud_with_polygon(pcl, json_path, visu):
     return cropped_pcl
 
 
-def remove_plane_from_point_cloud(pcl, distance_threshold=0.0013, ransac_n=3, num_iterations=600):
-    plane_model, inlier = pcl.segment_plane(distance_threshold=distance_threshold, ransac_n=ransac_n, num_iterations=num_iterations)
+def remove_plane_from_point_cloud(
+    pcl, distance_threshold=0.0013, ransac_n=3, num_iterations=600
+):
+    plane_model, inlier = pcl.segment_plane(
+        distance_threshold=distance_threshold,
+        ransac_n=ransac_n,
+        num_iterations=num_iterations,
+    )
     outlier_cloud = pcl.select_by_index(inlier, invert=True)
     return outlier_cloud, plane_model
 
 
-def apply_dbscan_clustering(pcl, eps=0.0008, min_points=10, print_progress=True, nbre_de_cluster_retour=1, seuil=0, type_return="tbl", visu_cluster=False):
+def apply_dbscan_clustering(
+    pcl,
+    eps=0.0008,
+    min_points=10,
+    print_progress=True,
+    nbre_de_cluster_retour=1,
+    seuil=0,
+    type_return="tbl",
+    visu_cluster=False,
+):
     """
     Apply DBSCAN clustering to a point cloud.
-    
+
     Args:
         pcl: Input point cloud
         eps: Maximum distance between two points to be considered neighbors
@@ -58,7 +72,7 @@ def apply_dbscan_clustering(pcl, eps=0.0008, min_points=10, print_progress=True,
         seuil: Minimum cluster size threshold (used when nbre_de_cluster_retour=0)
         type_return: Return type - "tbl" (list of clusters), "pcl" (concatenated point cloud), or "labels" (numpy array of labels)
         visu_cluster: Whether to visualize clusters
-        
+
     Returns:
         Depending on type_return:
         - "tbl": List of point clouds (one per cluster)
@@ -70,14 +84,14 @@ def apply_dbscan_clustering(pcl, eps=0.0008, min_points=10, print_progress=True,
         if type_return == "labels":
             return np.array([])
         return pcl
-    
+
     # Remove visualization in headless/non-interactive environments
     # o3d.visualization.draw_geometries([pcl])
 
     # creation des clusters et des tailles de cluster
-    with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
+    with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug):
         labels = np.array(pcl.cluster_dbscan(eps, min_points, print_progress))
-    
+
     # If labels are requested, return them directly
     if type_return == "labels":
         return labels
@@ -85,7 +99,7 @@ def apply_dbscan_clustering(pcl, eps=0.0008, min_points=10, print_progress=True,
     max_label = labels.max()
 
     # visualisation of cluster
-    if visu_cluster == True:
+    if visu_cluster:
         colors = plt.get_cmap("tab20")(labels / (max_label if max_label > 0 else 1))
         colors[labels < 0] = 0
         pcl.colors = o3d.utility.Vector3dVector(colors[:, :3])
@@ -137,13 +151,17 @@ def remove_statistical_outliers(pcl):
 
 # Mesh Operations
 def clean_triangle_mesh(mesh):
-    triangle_clusters, cluster_n_triangles, cluster_area = mesh.cluster_connected_triangles()
+    triangle_clusters, cluster_n_triangles, cluster_area = (
+        mesh.cluster_connected_triangles()
+    )
     triangle_clusters = np.asarray(triangle_clusters)
     cluster_n_triangles = np.asarray(cluster_n_triangles)
     cluster_area = np.asarray(cluster_area)
     # mesh_clean = copy.deepcopy(bpa_mesh)
 
-    triangles_to_remove = cluster_n_triangles[triangle_clusters] < max(cluster_n_triangles)
+    triangles_to_remove = cluster_n_triangles[triangle_clusters] < max(
+        cluster_n_triangles
+    )
     mesh.remove_triangles_by_mask(triangles_to_remove)
     mesh.compute_vertex_normals()
     mesh.remove_degenerate_triangles()
@@ -154,14 +172,17 @@ def clean_triangle_mesh(mesh):
 
 
 def poisson_reconstruction(pcl):
-
     # get bb du pcl pour crop le stl
     bbox = pcl.get_oriented_bounding_box()
 
     # calculate and re-orient normals
-    pcl.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    pcl.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30)
+    )
     pcl.orient_normals_to_align_with_direction(orientation_reference=[0.0, 0.0, 1.0])
-    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcl, depth=8)
+    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+        pcl, depth=8
+    )
     densities = np.array(densities)
     vertices_to_remove = densities < np.quantile(densities, 0.01)
     mesh.remove_vertices_by_mask(vertices_to_remove)
@@ -180,12 +201,13 @@ def poisson_reconstruction(pcl):
 
 
 def ball_pivoting_mesh_reconstruction(pcl):
-
     # pcl = apply_dbscan_clustering(pcl, eps=0.0006, min_points=10, print_progress=_debug, nbre_de_cluster_retour=1, seuil=0, type_return="pcl", visu_cluster=_debug)
 
     pcl = pcl.voxel_down_sample(voxel_size=0.001)
 
-    pcl.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    pcl.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30)
+    )
     print("normal calculated")
     pcl.orient_normals_to_align_with_direction(orientation_reference=[0.0, 0.0, 1.0])
     print("normal oriented")
@@ -193,7 +215,9 @@ def ball_pivoting_mesh_reconstruction(pcl):
     avg_dist = np.mean(distances)
     radius = 3.2 * avg_dist
 
-    bpa_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcl, o3d.utility.DoubleVector([radius, radius * 2]))
+    bpa_mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
+        pcl, o3d.utility.DoubleVector([radius, radius * 2])
+    )
     print("bpa done")
     # clean the mesh
 
@@ -206,14 +230,13 @@ def ball_pivoting_mesh_reconstruction(pcl):
 
 
 def convert_mesh_to_ros_geometry_msg(mesh):
-
     vertices = np.array(mesh.vertices)
     triangles = np.array(mesh.triangles)
 
     message = MeshGeometryStamped()
-    message.uuid="msg"
-    message.header.stamp= rclpy.time.Time().to_msg()
-    message.header.frame_id="world"
+    message.uuid = "msg"
+    message.header.stamp = rclpy.time.Time().to_msg()
+    message.header.frame_id = "world"
 
     for i in range(len(vertices)):
         Message_point = Point()
@@ -231,7 +254,6 @@ def convert_mesh_to_ros_geometry_msg(mesh):
 
 
 def convert_mesh_to_ros_msg(mesh):
-
     vertices = np.array(mesh.vertices)
     triangles = np.array(mesh.triangles)
     message = Mesh()
@@ -268,10 +290,26 @@ def perform_icp_registration(source, target, ICP_type="PointToPoint"):
     target_cordon = remove_plane_from_point_cloud(target)
     o3d.visualization.draw_geometries([target_cordon])
 
-    filtred_source_cordon = apply_dbscan_clustering(source_cordon, eps=0.0008, min_points=10, print_progress=True, nbre_de_cluster_retour=0, seuil=800, type_return="pcl")
+    filtred_source_cordon = apply_dbscan_clustering(
+        source_cordon,
+        eps=0.0008,
+        min_points=10,
+        print_progress=True,
+        nbre_de_cluster_retour=0,
+        seuil=800,
+        type_return="pcl",
+    )
     o3d.visualization.draw_geometries([filtred_source_cordon])
 
-    filtred_target_cordon = apply_dbscan_clustering(target_cordon, eps=0.0008, min_points=10, print_progress=True, nbre_de_cluster_retour=0, seuil=800, type_return="pcl")
+    filtred_target_cordon = apply_dbscan_clustering(
+        target_cordon,
+        eps=0.0008,
+        min_points=10,
+        print_progress=True,
+        nbre_de_cluster_retour=0,
+        seuil=800,
+        type_return="pcl",
+    )
     o3d.visualization.draw_geometries([filtred_target_cordon])
 
     crit = o3d.pipelines.registration.ICPConvergenceCriteria()
@@ -279,20 +317,47 @@ def perform_icp_registration(source, target, ICP_type="PointToPoint"):
     crit.max_iteration = 350
     crit.relative_fitness = 0.00000000000000001
     threshold = 1
-    trans_init = np.asarray([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    trans_init = np.asarray(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
     print("initial alignement")
-    evaluation = o3d.pipelines.registration.evaluate_registration(source, target, threshold, trans_init)
+    evaluation = o3d.pipelines.registration.evaluate_registration(
+        source, target, threshold, trans_init
+    )
     print(evaluation)
 
     if ICP_type == "PointToPoint":
-        reg_p2p = o3d.pipelines.registration.registration_icp(source, target, threshold, trans_init, o3d.pipelines.registration.TransformationEstimationPointToPoint(), crit)
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            threshold,
+            trans_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            crit,
+        )
 
     if ICP_type == "PointToPlane":
-        source.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50))
-        target.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50))
-        rospy.loginfo("normal estimation for ICP done")
-        reg_p2p = o3d.pipelines.registration.registration_icp(source, target, threshold, trans_init, o3d.pipelines.registration.TransformationEstimationPointToPlane(), crit)
+        source.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50)
+        )
+        target.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.5, max_nn=50)
+        )
+        rclpy.logging.get_logger("ICP").info("normal estimation for ICP done")
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            threshold,
+            trans_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            crit,
+        )
 
     print(reg_p2p)
     print(reg_p2p.transformation)
@@ -322,7 +387,20 @@ def visualize_selection_polygon_volume(polyG):
             points_bas.append(tmp_)
 
     points = points_haut + points_bas
-    lines = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+    lines = [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [3, 0],
+        [4, 5],
+        [5, 6],
+        [6, 7],
+        [7, 4],
+        [0, 4],
+        [1, 5],
+        [2, 6],
+        [3, 7],
+    ]
     line_set = o3d.geometry.LineSet(
         points=o3d.utility.Vector3dVector(points),
         lines=o3d.utility.Vector2iVector(lines),
@@ -338,8 +416,14 @@ def visualize_inliers_and_outliers(cloud, ind):
     inlier_cloud.paint_uniform_color([0.8, 0.8, 0.8])
     o3d.visualization.draw_geometries([inlier_cloud, outlier_cloud])
 
+
 # Mesh Operations
-def generate_upper_ellipsoid_mesh(center_3d: np.ndarray, axes_3d: tuple[float, float, float], rotation_matrix: np.ndarray, resolution: int = 20) -> o3d.geometry.TriangleMesh:
+def generate_upper_ellipsoid_mesh(
+    center_3d: np.ndarray,
+    axes_3d: tuple[float, float, float],
+    rotation_matrix: np.ndarray,
+    resolution: int = 20,
+) -> o3d.geometry.TriangleMesh:
     """
     Create a 3D upper-hemisphere ellipsoid mesh.
 
@@ -359,7 +443,7 @@ def generate_upper_ellipsoid_mesh(center_3d: np.ndarray, axes_3d: tuple[float, f
     vertices = np.asarray(sphere.vertices)
 
     # Keep only upper hemisphere (z >= 0 in local coordinates)
-    upper_mask = vertices[:, 2] >= 0
+    # upper_mask = vertices[:, 2] >= 0
 
     # Scale to ellipsoid
     vertices[:, 0] *= axes_3d[0]  # semi-major axis
@@ -397,4 +481,3 @@ def generate_upper_ellipsoid_mesh(center_3d: np.ndarray, axes_3d: tuple[float, f
     sphere.compute_vertex_normals()
 
     return sphere
-
