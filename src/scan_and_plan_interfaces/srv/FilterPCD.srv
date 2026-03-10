@@ -1,0 +1,31 @@
+# Input point cloud to filter
+sensor_msgs/PointCloud2 input_pcd
+
+# Pass-through filter parameters (crop to region of interest)
+float32[] x_range  # [min, max] in meters, default [-0.5, 0.5]
+float32[] y_range  # [min, max] in meters, default [-0.5, 0.5]
+float32[] z_range  # [min, max] in meters, default [0.3, 1.2]
+
+# Voxel downsampling parameter
+float32 voxel_size  # voxel size in meters, default 0.005
+
+# Plane removal parameters (RANSAC)
+float32 plane_distance_threshold  # distance threshold for plane fitting, default 0.003 (3mm)
+uint32 plane_ransac_n  # number of points for RANSAC, default 3
+uint32 plane_num_iterations  # RANSAC iterations, default 1000
+
+# Clustering parameters (DBSCAN)
+float32 cluster_eps  # neighborhood distance for clustering, default 0.01 (10mm)
+uint32 cluster_min_points  # minimum points per cluster, default 20
+bool print_progress  # enable progress logging, default false
+
+---
+# Filtered point cloud (final object after all processing steps)
+sensor_msgs/PointCloud2 filtered_pcd
+
+# Plane model from RANSAC [a, b, c, d] where ax + by + cz + d = 0
+float64[4] plane_model
+
+# Status
+bool success
+string message

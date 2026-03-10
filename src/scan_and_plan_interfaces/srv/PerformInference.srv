@@ -1,0 +1,7 @@
+string prompt
+int32 num_poses_to_average
+float32 timeout_sec  # Timeout in seconds
+---
+Perception[] perception_objects
+bool success
+string message
