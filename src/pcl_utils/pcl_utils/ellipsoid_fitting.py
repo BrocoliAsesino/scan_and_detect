@@ -321,14 +321,7 @@ def generate_camera_viewpoints_around_ellipsoid(
         # Camera frame: Z forward (pointing at object), Y down, X right
         z_axis = view_direction
 
-        use_minor_axis = True
-
-        if use_minor_axis:
-            x_axis = rotation_matrix[
-                :, 0
-            ]  # Major axis direction in world coordinates (yes they are inverted)
-        else:
-            x_axis = rotation_matrix[:, 1]  # Minor axis direction in world coordinates
+        x_axis = rotation_matrix[:, 0]  # Major axis direction in world coordinates
         x_axis = x_axis / np.linalg.norm(x_axis)
 
         y_axis = np.cross(z_axis, x_axis)
@@ -352,7 +345,7 @@ def generate_camera_viewpoints_along_principal_axis(
     plane_model: np.ndarray,
     num_viewpoints: int = 12,
     standoff_distance: float = 0.3,
-    use_minor_axis: bool = False,
+    used_axis: str = "major_axis",
 ) -> List[tuple[np.ndarray, np.ndarray]]:
     """
     Generate camera viewpoints along the principal axis, looking straight down at the plane.
@@ -377,7 +370,7 @@ def generate_camera_viewpoints_along_principal_axis(
     plane_normal = plane_normal / np.linalg.norm(plane_normal)
 
     # Generate uniformly distributed angles
-    if use_minor_axis:
+    if used_axis == "major_axis":
         azimuth_angles = 0
     else:
         azimuth_angles = np.pi / 2
@@ -413,10 +406,8 @@ def generate_camera_viewpoints_along_principal_axis(
         # Camera frame: Z forward (pointing at object), Y down, X right
         z_axis = view_direction
 
-        if use_minor_axis:
-            x_axis = rotation_matrix[
-                :, 0
-            ]  # Major axis direction in world coordinates (yes they are inverted)
+        if used_axis == "major_axis":
+            x_axis = rotation_matrix[:, 0]  # Major axis direction in world coordinates
         else:
             x_axis = rotation_matrix[:, 1]  # Minor axis direction in world coordinates
         x_axis = x_axis / np.linalg.norm(x_axis)
@@ -841,7 +832,7 @@ def ellipsoid_fitting_pipeline(
         plane_model,
         num_viewpoints=10,
         standoff_distance=0.1,
-        use_minor_axis=False,
+        viewpoints_along="major_axis",
     )
     view_points = generate_camera_viewpoints_around_ellipsoid(
         center_3d,
