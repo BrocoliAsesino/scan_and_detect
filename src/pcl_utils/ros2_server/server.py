@@ -433,7 +433,10 @@ class FilterPCL(Node):
                 )
 
             # Generate viewpoints based on method
-            if request.use_minor_axis:
+            if (
+                request.viewpoints_along == "major_axis"
+                or request.viewpoints_along == "minor_axis"
+            ):
                 view_points = (
                     ellipsoid_fit.generate_camera_viewpoints_along_principal_axis(
                         center_3d,
@@ -442,7 +445,7 @@ class FilterPCL(Node):
                         plane_model,
                         num_viewpoints=num_viewpoints,
                         standoff_distance=standoff_distance,
-                        use_minor_axis=True,
+                        used_axis=request.viewpoints_along,
                     )
                 )
             else:

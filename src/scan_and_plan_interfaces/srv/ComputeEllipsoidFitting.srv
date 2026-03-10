@@ -1,0 +1,21 @@
+# Object point cloud to fit ellipsoid to
+sensor_msgs/PointCloud2 object_pcd
+
+# Plane model [a, b, c, d] where ax + by + cz + d = 0
+float64[4] plane_model
+
+# Processing parameters
+float32 height_margin  # margin for ellipsoid height, default 0.01
+bool debug  # enable visualization during processing, default false
+---
+# Fitted ellipsoid parameters
+geometry_msgs/Point center_3d  # ellipsoid center in 3D
+float32[3] axes_3d  # semi-axes lengths [a, b, c]
+float32[9] rotation_matrix  # 3x3 rotation matrix (row-major)
+
+# Ellipsoid mesh for visualization (optional)
+shape_msgs/Mesh ellipsoid_mesh
+
+# Status
+bool success
+string message

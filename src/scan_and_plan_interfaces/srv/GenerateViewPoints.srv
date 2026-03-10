@@ -1,0 +1,27 @@
+# Ellipsoid parameters (from ComputeEllipsoidFitting)
+geometry_msgs/Point center_3d  # ellipsoid center in 3D
+float32[3] axes_3d  # semi-axes lengths [a, b, c]
+float32[9] rotation_matrix  # 3x3 rotation matrix (row-major)
+
+# Plane model [a, b, c, d] where ax + by + cz + d = 0 (needed for minor axis viewpoints)
+float64[4] plane_model
+
+# Optional: point cloud and mesh for visualization
+sensor_msgs/PointCloud2 object_pcd
+shape_msgs/Mesh ellipsoid_mesh  # TODO: add if mesh visualization is needed
+
+# Viewpoint generation parameters
+string viewpoints_along # options: "major_axis", "minor_axis", "circular" (default)
+uint32 num_viewpoints  # number of viewpoints to generate, default 12
+float32 standoff_distance  # camera distance from surface, default 0.1
+float32 elevation_min  # minimum elevation angle in degrees, default 20
+float32 elevation_max  # maximum elevation angle in degrees, default 70
+bool debug  # enable visualization during processing, default false
+
+---
+# Generated viewpoints (camera positions and orientations)
+geometry_msgs/Pose[] viewpoints
+
+# Status
+bool success
+string message

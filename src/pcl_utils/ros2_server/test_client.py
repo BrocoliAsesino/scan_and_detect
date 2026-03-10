@@ -156,7 +156,9 @@ class PCLUtilsTestClient(Node):
             viewpoints_request.standoff_distance = 0.1
             viewpoints_request.elevation_min = 20.0
             viewpoints_request.elevation_max = 70.0
-            viewpoints_request.use_minor_axis = False
+            viewpoints_request.viewpoints_along = (
+                "circular"  # Options: "circular", "major_axis", "minor_axis"
+            )
             viewpoints_request.debug = True  # Set to True to see visualization
 
             viewpoints_future = self.viewpoints_client.call_async(viewpoints_request)
