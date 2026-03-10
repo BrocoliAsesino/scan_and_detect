@@ -117,6 +117,12 @@ def fit_ellipse_to_2d_points(
     axes = (ellipse[1][0] / 2.0, ellipse[1][1] / 2.0)  # Convert diameter to radius
     angle = ellipse[2]  # Rotation angle in degrees
 
+    # Ensure axes[0] is always the major axis (larger) and axes[1] is the minor axis (smaller)
+    # This prevents axis inversion issues that affect viewpoint generation
+    if axes[1] > axes[0]:
+        axes = (axes[1], axes[0])
+        angle = angle + 90.0
+
     return center, axes, angle
 
 
