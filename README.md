@@ -25,7 +25,7 @@
 
 ## PCL Utils Library
 
-The `pcl_utils` ROS2 package provides point cloud processing, ellipsoid fitting, and viewpoint generation capabilities for robotic scanning applications.
+The `pcd_filtering_utils` ROS2 package provides point cloud processing, ellipsoid fitting, and viewpoint generation capabilities for robotic scanning applications.
 
 ### Core Modules
 

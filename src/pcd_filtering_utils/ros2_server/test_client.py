@@ -15,7 +15,7 @@ import threading
 
 class PCLUtilsTestClient(Node):
     def __init__(self):
-        super().__init__("pcl_utils_test_client")
+        super().__init__("pcd_filtering_utils_test_client")
 
         # Use reentrant callback groups to allow concurrent callbacks
         self.service_cb_group = ReentrantCallbackGroup()
