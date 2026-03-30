@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = "pcl_utils"
+package_name = "pcd_filtering_utils"
 
 setup(
     name=package_name,
@@ -24,8 +24,8 @@ setup(
     entry_points={
         "console_scripts": [
             "plc_filters = test_scripts.plc_filters:main",
-            "pcl_utils_server = ros2_server.server:main",
-            "pcl_utils_test_client = ros2_server.test_client:main",
+            "pcd_filtering_utils_server = ros2_server.server:main",
+            "pcd_filtering_utils_test_client = ros2_server.test_client:main",
         ],
     },
 )

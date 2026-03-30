@@ -3,10 +3,10 @@
 import open3d
 import numpy as np
 
-import pcl_utils.open3d_ros_helperV2 as o3d_ros
-import pcl_utils.pointcloud_processing as pcd_processing
-import pcl_utils.pointcloud_registration as pcd_registration
-import pcl_utils.ellipsoid_fitting as ellipsoid_fit
+import pcd_filtering_utils.open3d_ros_helperV2 as o3d_ros
+import pcd_filtering_utils.pointcloud_processing as pcd_processing
+import pcd_filtering_utils.pointcloud_registration as pcd_registration
+import pcd_filtering_utils.ellipsoid_fitting as ellipsoid_fit
 
 import rclpy
 from rclpy.node import Node
@@ -28,7 +28,7 @@ import copy
 
 class FilterPCL(Node):
     def __init__(self):
-        super().__init__("pcl_utils_server")
+        super().__init__("pcd_filtering_utils_server")
         self.cb_group = ReentrantCallbackGroup()
 
         # Create services with custom interfaces
