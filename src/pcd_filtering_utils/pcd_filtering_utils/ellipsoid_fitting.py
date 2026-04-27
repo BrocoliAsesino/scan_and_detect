@@ -171,7 +171,7 @@ def convert_ellipse_to_3d(
     plane_point = -d * normal
     center_3d = plane_point + center_2d[0] * u + center_2d[1] * v
 
-    # Estimate object height (along plane normal)
+    # Estimate object height (take max absolute value since 180° rotation handles orientation)
     # Project all points along normal direction
     heights = np.dot(points_3d - center_3d, normal)
     semi_height = max(abs(heights.max()), abs(heights.min())) + height_margin
@@ -187,6 +187,11 @@ def convert_ellipse_to_3d(
 
     # Build 3x3 rotation matrix: columns are [major_axis, minor_axis, normal]
     rotation_matrix = np.column_stack([major_dir, minor_dir, normal])
+
+    # Apply 180° rotation around minor axis to flip z-axis toward upper hemisphere
+    # This also flips the major axis but they stay on the same line
+    rotation_180_minor = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]])
+    rotation_matrix = rotation_matrix @ rotation_180_minor
 
     axes_3d = (axes_2d[0], axes_2d[1], semi_height)
 
@@ -241,7 +246,10 @@ def create_upper_ellipsoid_mesh(
     # Keep triangles where at least 2 vertices are in upper hemisphere
     # Transform back to check
     vertices_local = (vertices_array - center_3d) @ rotation_matrix
-    upper_vertices = vertices_local[:, 2] >= -0.01 * axes_3d[2]  # Small tolerance
+    # After 180° rotation, z-axis points upward, so keep positive z values
+    upper_vertices = (
+        vertices_local[:, 2] >= 0.01 * axes_3d[2]
+    )  # Small positive tolerance
 
     valid_triangles = []
     for tri in triangles:
@@ -365,9 +373,9 @@ def generate_camera_viewpoints_along_principal_axis(
     """
     viewpoints = []
 
-    # Extract and normalize plane normal (pointing up from table)
-    plane_normal = plane_model[:3]
-    plane_normal = plane_normal / np.linalg.norm(plane_normal)
+    # Use ellipsoid's z-axis (after 180° rotation, it points away from table)
+    # Camera should look opposite direction (toward table)
+    ellipsoid_z_axis = rotation_matrix[:, 2]
 
     # Generate uniformly distributed angles
     if used_axis == "major_axis":
@@ -399,8 +407,8 @@ def generate_camera_viewpoints_along_principal_axis(
         # Camera position: offset from surface along normal
         camera_position = point_on_surface + standoff_distance * world_normal
 
-        # Camera looks straight down toward plane (opposite of plane normal)
-        view_direction = -plane_normal
+        # Camera looks down toward table (opposite of ellipsoid z-axis which points up)
+        view_direction = -ellipsoid_z_axis
         view_direction = view_direction / np.linalg.norm(view_direction)
 
         # Camera frame: Z forward (pointing at object), Y down, X right

@@ -67,10 +67,14 @@ class FilterPCL(Node):
         )
 
         # Publishers for filtered point clouds
+        self.cropped_pub = self.create_publisher(PointCloud2, "/cropped_pointcloud", 10)
         self.filtered_pub = self.create_publisher(
             PointCloud2, "/filtered_pointcloud", 10
         )
         self.object_pub = self.create_publisher(PointCloud2, "/object_pointcloud", 10)
+        self.ellipsoid_pub = self.create_publisher(
+            PointCloud2, "/ellipsoid_pointcloud", 10
+        )
 
         # Storage for different processing stages
         self.latest_o3d_pcd = open3d.geometry.PointCloud()
@@ -81,6 +85,9 @@ class FilterPCL(Node):
         self.plane_removed_pcd = open3d.geometry.PointCloud()  # After plane removal
         self.object_pcd = open3d.geometry.PointCloud()  # Final object (largest cluster)
         self.plane_model = None  # Table plane equation [a, b, c, d] from RANSAC
+        self.ellipsoid_pcd = (
+            open3d.geometry.PointCloud()
+        )  # Points above the plane for ellipsoid fitting
 
         # Processing parameters - size of the region of interest (ROI) around the object
         self.x_range = [-0.5, 0.5]  # meters
@@ -119,6 +126,12 @@ class FilterPCL(Node):
                 self.object_pcd, frame_id=self.latest_frame_id
             )
             self.object_pub.publish(object_ros)
+
+        if len(self.ellipsoid_pcd.points) > 0:
+            ellipsoid_ros = o3d_ros.o3dpc_to_rospc(
+                self.ellipsoid_pcd, frame_id=self.latest_frame_id
+            )
+            self.ellipsoid_pub.publish(ellipsoid_ros)
 
     def filter_pcd_callback(self, request, response):
         """
@@ -189,6 +202,11 @@ class FilterPCL(Node):
                 "Step 2: After pass-through filter: %d points"
                 % len(self.cropped_pcd.points)
             )
+            # Publish the cropped point cloud for visualization
+            cropped_ros = o3d_ros.o3dpc_to_rospc(
+                self.cropped_pcd, frame_id=self.latest_frame_id
+            )
+            self.cropped_pub.publish(cropped_ros)
 
             if len(self.cropped_pcd.points) < 100:
                 response.success = False
@@ -366,6 +384,10 @@ class FilterPCL(Node):
             ellipsoid_mesh_o3d = ellipsoid_fit.create_upper_ellipsoid_mesh(
                 center_3d, axes_3d, rotation_matrix, resolution=20
             )
+            self.ellipsoid_pcd = ellipsoid_mesh_o3d.sample_points_uniformly(
+                number_of_points=1000
+            )
+
             if request.debug:
                 ellipsoid_fit.display_object_with_ellipsoid(
                     object_pcd, ellipsoid_mesh_o3d, center_3d, axes_3d
@@ -433,6 +455,11 @@ class FilterPCL(Node):
                 )
 
             # Generate viewpoints based on method
+            self.get_logger().info(
+                "######################## Viewpoints along method: %s"
+                % request.viewpoints_along
+            )
+
             if (
                 request.viewpoints_along == "major_axis"
                 or request.viewpoints_along == "minor_axis"
