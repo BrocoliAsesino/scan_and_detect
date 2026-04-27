@@ -1,0 +1,6 @@
+<launch>
+  <node pkg="adapta_bt_executor" exec="adapta_bt_executor" output="screen">
+    <param from="$(find-pkg-share adapta_bt_executor)/config/adapta_bt_executor.yaml"/>
+  </node>
+
+</launch>

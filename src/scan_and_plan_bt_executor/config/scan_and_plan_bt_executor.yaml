@@ -1,0 +1,20 @@
+bt_action_server:
+  ros__parameters:
+    action_name: "adapta_bt_server" # Optional (defaults to `bt_action_server`)
+    tick_frequency: 100 # Optional (defaults to 100 Hz)
+    groot2_port: 1667 # Optional (defaults to 1667)
+    ros_plugins_timeout: 10000  # Optional (seconds)
+
+    plugins:
+      - eut_collab_bt_core/bt_plugins
+      - adapta_bt_core/bt_plugins
+      - eut_yolo_bt_core/bt_plugins
+      - behaviortree_eut_plugins/bt_plugins
+      - projector_bt_core/bt_plugins
+      # Add any other plugins folder here
+      - robot_actions_bt_core/bt_plugins
+
+    behavior_trees:
+      - adapta_bt_executor/behavior_trees
+      - eut_collab_bt_examples/behavior_trees
+      # Add any other behavior trees folder here

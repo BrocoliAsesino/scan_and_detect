@@ -1,0 +1,5 @@
+<description>
+    <plugins name="scan_and_plan_bt_core"
+	    folder_path="bt_plugins"
+	    description="Behavior Tree plugins for Scan and Plan" />
+</description>
